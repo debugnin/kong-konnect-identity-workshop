@@ -1,0 +1,136 @@
+### ────────────────────────────────────────────────────────────────────────────
+### Kong Identity workshop — live API walkthrough
+### Works with the VS Code "REST Client" extension and JetBrains' built-in HTTP client.
+###
+### Nothing secret lives in this file. Export these in the shell that launches
+### your editor (or run scripts 01–04 first, which write .generated/state.env):
+###   KONNECT_TOKEN   KONNECT_REGION   DIRECTORY_ID   PRINCIPAL_ID
+###   CONTROL_PLANE_ID   CONSUMER_ID   OIDC_SUBJECT   DEMO_CLIENT_SECRET
+###   CG_STANDARD_ID  CG_GOLD_ID
+### Run requests top to bottom; copy ids from each response into your shell env.
+### ────────────────────────────────────────────────────────────────────────────
+
+@region = {{$processEnv KONNECT_REGION}}
+@konnect = https://{{region}}.api.konghq.com
+@token = {{$processEnv KONNECT_TOKEN}}
+@directoryId = {{$processEnv DIRECTORY_ID}}
+@principalId = {{$processEnv PRINCIPAL_ID}}
+@controlPlaneId = {{$processEnv CONTROL_PLANE_ID}}
+@consumerId = {{$processEnv CONSUMER_ID}}
+@oidcIssuer = http://keycloak:8080/realms/kong-workshop
+@oidcSubject = {{$processEnv OIDC_SUBJECT}}
+@keycloak = http://localhost:8080
+@proxy = http://localhost:8000
+
+### ── Scenario 2 · Keycloak ─────────────────────────────────────────────────────
+
+### 2.1 Discovery document — the plugin reads this from the issuer URL
+GET {{keycloak}}/realms/kong-workshop/.well-known/openid-configuration
+
+### 2.2 Client Credentials grant — copy `access_token` into jwt.io (or script 01b) to read the claims
+POST {{keycloak}}/realms/kong-workshop/protocol/openid-connect/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=client_credentials&client_id=workshop-demo-client&client_secret={{$processEnv DEMO_CLIENT_SECRET}}
+
+### ── Scenario 1 · Kong Identity ────────────────────────────────────────────────
+
+### 1.1 Does a directory already exist? (one per region per org)
+GET {{konnect}}/v2/directories
+Authorization: Bearer {{token}}
+
+### 1.2 Create the directory — only if 1.1 returned an empty list
+POST {{konnect}}/v2/directories
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "kong-identity-directory",
+  "description": "Directory for the Kong Identity workshop",
+  "allow_all_control_planes": true
+}
+
+### 1.3 Create a principal, with metadata
+POST {{konnect}}/v2/directories/{{directoryId}}/principals
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "display_name": "workshop-demo-client",
+  "description": "Machine client for the Kong Identity workshop",
+  "metadata": { "business_unit": "payments", "environment": "workshop" }
+}
+
+### 1.4 Link the principal to the Keycloak client: issuer + claim must match the token exactly
+POST {{konnect}}/v2/directories/{{directoryId}}/principals/{{principalId}}/identities
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "type": "oidc",
+  "issuer": "{{oidcIssuer}}",
+  "claim": { "name": "sub", "value": "{{oidcSubject}}" }
+}
+
+### 1.5 Verify
+GET {{konnect}}/v2/directories/{{directoryId}}/principals/{{principalId}}
+Authorization: Bearer {{token}}
+
+###
+GET {{konnect}}/v2/directories/{{directoryId}}/principals/{{principalId}}/identities
+Authorization: Bearer {{token}}
+
+### ── Scenario 3 · Through the gateway ──────────────────────────────────────────
+
+### 3A No token → 401
+GET {{proxy}}/anything
+
+### 3C Valid token + matching principal → 200 (paste a fresh access_token from 2.2)
+GET {{proxy}}/anything
+Authorization: Bearer PASTE_ACCESS_TOKEN_HERE
+
+### Datakit trace — every node's input/output (needs the datakit plugin from kong/plugins.yml)
+GET {{proxy}}/anything
+Authorization: Bearer PASTE_ACCESS_TOKEN_HERE
+X-Datakit-Debug-Trace: true
+
+### ── Scenario 4 · Consumer linkage ─────────────────────────────────────────────
+
+### 4.3 Add a control_plane_consumer identity to the SAME principal
+POST {{konnect}}/v2/directories/{{directoryId}}/principals/{{principalId}}/identities
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "type": "control_plane_consumer",
+  "control_plane_id": "{{controlPlaneId}}",
+  "consumer_id": "{{consumerId}}"
+}
+
+### ── Scenario 5 · Consumer Group linkage (reserved metadata key, NOT an identity) ─
+
+### 5.3 Map the principal to a group. Send the FULL metadata object.
+PATCH {{konnect}}/v2/directories/{{directoryId}}/principals/{{principalId}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "metadata": {
+    "business_unit": "payments",
+    "environment": "workshop",
+    "consumer_groups": ["{{$processEnv CG_STANDARD_ID}}"]
+  }
+}
+
+### 5.4 Move it to the gold group
+PATCH {{konnect}}/v2/directories/{{directoryId}}/principals/{{principalId}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "metadata": {
+    "business_unit": "payments",
+    "environment": "workshop",
+    "consumer_groups": ["{{$processEnv CG_GOLD_ID}}"]
+  }
+}

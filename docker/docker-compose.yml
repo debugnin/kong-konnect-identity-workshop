@@ -1,0 +1,70 @@
+# Workshop environment: Keycloak (external IdP) + httpbin (upstream) + one Kong Gateway data plane.
+#
+# The control plane and Kong Identity are Konnect SaaS — they are NOT in this file.
+# Start via scripts/01-setup-environment.sh, which generates the files this
+# compose project reads (.generated/compose.env, .generated/dp.env, .generated/dp/*).
+name: kong-identity-workshop
+
+services:
+  keycloak:
+    image: ${KEYCLOAK_IMAGE:-quay.io/keycloak/keycloak:26.0.7}
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD:?run scripts/01-setup-environment.sh}
+      # Pin the issuer. Tokens always carry iss=http://keycloak:8080/realms/<realm>,
+      # whichever hostname the caller used. The gateway reaches Keycloak at that
+      # name through Docker DNS; your laptop uses localhost:8080 for the token call.
+      KC_HOSTNAME: http://keycloak:8080
+      KC_HOSTNAME_STRICT: "false"
+      KC_HTTP_ENABLED: "true"
+      # Substituted into keycloak/realm-export.json at import time (${VAR} placeholders).
+      DEMO_CLIENT_SECRET: ${DEMO_CLIENT_SECRET:?run scripts/01-setup-environment.sh}
+      UNMAPPED_CLIENT_SECRET: ${UNMAPPED_CLIENT_SECRET:?run scripts/01-setup-environment.sh}
+      API_AUDIENCE: ${API_AUDIENCE:-kong-workshop-api}
+    volumes:
+      - ../keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+    ports:
+      - "8080:8080"
+    networks: [workshop]
+
+  httpbin:
+    # Echoes whatever the gateway forwards — used to show the headers Kong
+    # derives from the authenticated principal and consumer.
+    image: ${HTTPBIN_IMAGE:-mccutchen/go-httpbin:2.15.0}
+    networks: [workshop]
+
+  kong-dp:
+    image: ${KONG_IMAGE:-kong/kong-gateway:3.16}
+    env_file:
+      - ../.generated/dp.env   # cluster endpoints for YOUR control plane (generated)
+    environment:
+      KONG_ROLE: data_plane
+      KONG_DATABASE: "off"
+      KONG_VITALS: "off"
+      KONG_KONNECT_MODE: "on"
+      KONG_CLUSTER_MTLS: pki
+      KONG_CLUSTER_CERT: /etc/kong-dp/tls.crt
+      KONG_CLUSTER_CERT_KEY: /etc/kong-dp/tls.key
+      KONG_LUA_SSL_TRUSTED_CERTIFICATE: system
+      KONG_CLUSTER_DP_LABELS: "created-by:identity-workshop"
+      KONG_NGINX_WORKER_PROCESSES: "1"
+      KONG_STATUS_LISTEN: 0.0.0.0:8100
+      KONG_LOG_LEVEL: info
+      # WORKSHOP ONLY: the docs say cached principal lookups expire after the
+      # smallest of directory TTL (default 10 min), credential TTL and db_cache_ttl.
+      # 30 s lets the Consumer Group demo show a metadata change quickly.
+      # Leave this at its default in production.
+      KONG_DB_CACHE_TTL: "30"
+    volumes:
+      - ../.generated/dp:/etc/kong-dp:ro
+    ports:
+      - "8000:8000"   # proxy
+      - "8443:8443"   # proxy (TLS)
+      - "8100:8100"   # status API (readiness only)
+    depends_on: [keycloak, httpbin]
+    networks: [workshop]
+
+networks:
+  workshop:
+    name: kong-identity-workshop

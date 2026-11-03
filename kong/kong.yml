@@ -1,0 +1,14 @@
+# Gateway entities: one Service, one Route. Applied by scripts/05-configure-gateway.sh
+# `httpbin` resolves through Docker DNS on the workshop network.
+_format_version: "3.0"
+services:
+  - name: workshop-httpbin
+    url: http://httpbin:8080
+    tags: [identity-workshop]
+    routes:
+      - name: workshop-anything
+        paths:
+          - /anything
+        strip_path: false
+        protocols: [http, https]
+        tags: [identity-workshop]

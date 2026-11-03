@@ -1,0 +1,20 @@
+# Test B, second half. Same OIDC plugin, but a verified token with NO matching
+# principal is allowed through (kong.client.principal is null) instead of a 401.
+# Applied and reverted automatically by scripts/10-test-authentication.sh.
+_format_version: "3.0"
+plugins:
+  - name: openid-connect
+    service: workshop-httpbin
+    tags: [identity-workshop]
+    config:
+      issuer: "${{ env "DECK_OIDC_ISSUER" }}"
+      auth_methods:
+        - bearer
+      audience:
+        - "${{ env "DECK_API_AUDIENCE" }}"
+      ssl_verify: false
+      principals:
+        enabled: true
+        directory: "${{ env "DECK_DIRECTORY_NAME" }}"
+        error_on_miss: false
+      cache_tokens_salt: "${{ env "DECK_TOKEN_SALT" }}"

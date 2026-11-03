@@ -1,0 +1,6 @@
+# Scenario 4. A traditional Kong Gateway Consumer that a principal will be linked to.
+_format_version: "3.0"
+consumers:
+  - username: workshop-demo-consumer
+    custom_id: workshop-demo-client
+    tags: [identity-workshop]

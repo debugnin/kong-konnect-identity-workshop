@@ -1,0 +1,8 @@
+# Generated at runtime — contains secrets (client secrets, DP private key). Never commit.
+.generated/
+environment/.env
+*.pem
+*.key
+node_modules/
+.DS_Store
+~$*

@@ -1,0 +1,51 @@
+# Applied by scripts/05-configure-gateway.sh. Values in ${{ env "DECK_..." }} are
+# filled by decK from the environment — nothing secret lives in this file.
+_format_version: "3.0"
+plugins:
+
+  # ── 1. OpenID Connect: verify the Keycloak bearer token, then hydrate the
+  #       matching Kong Identity principal. Requires Gateway 3.15+ (Konnect only).
+  - name: openid-connect
+    service: workshop-httpbin
+    tags: [identity-workshop]
+    config:
+      issuer: "${{ env "DECK_OIDC_ISSUER" }}"   # discovery + JWKS are fetched from here
+      auth_methods:
+        - bearer                                # client already holds a token from Keycloak
+      audience:
+        - "${{ env "DECK_API_AUDIENCE" }}"      # must appear in the token's `aud` claim
+      ssl_verify: false                         # demo issuer is plain HTTP on a private network
+      principals:
+        enabled: true                           # look the principal up after the token is verified
+        directory: "${{ env "DECK_DIRECTORY_NAME" }}"   # the directory NAME, not its ID
+        # error_on_miss is left at its default: a verified token with no matching
+        # principal gets a 401. See plugins.error-on-miss-false.yml for the other mode.
+      cache_tokens_salt: "${{ env "DECK_TOKEN_SALT" }}" # required by decK 1.59+; stable across syncs
+
+  # ── 2. Datakit: make the gateway request context visible.
+  #       Reads kong.client.principal / kong.client.consumer and forwards the
+  #       principal as headers, so the upstream (httpbin) echoes what Kong knows.
+  #       Requires Gateway 3.16 for the principal property.
+  - name: datakit
+    service: workshop-httpbin
+    tags: [identity-workshop]
+    config:
+      debug: true                 # workshop only — enables the X-Datakit-Debug-Trace header
+      nodes:
+        - name: GET_PRINCIPAL
+          type: property
+          property: kong.client.principal
+        - name: GET_CONSUMER
+          type: property
+          property: kong.client.consumer
+        - name: PRINCIPAL_HEADERS
+          type: jq
+          input: GET_PRINCIPAL
+          output: service_request.headers
+          jq: |
+            {
+              "X-Principal-Id": (.id // "none"),
+              "X-Principal-Name": (.display_name // "none"),
+              "X-Principal-Business-Unit": (.metadata.business_unit // "none"),
+              "X-Principal-Consumer-Groups": ((.metadata.consumer_groups // []) | join(","))
+            }

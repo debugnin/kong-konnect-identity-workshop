@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Test stub for `docker`. Records the call; pretends everything works.
+echo "docker $*" >> "${STUB_LOG:-/dev/null}"
+case "$1 $2" in
+  "info "*) exit 0 ;;
+  "compose version") echo "Docker Compose version v2.stub"; exit 0 ;;
+esac
+exit 0

@@ -1,0 +1,29 @@
+#!/usr/bin/env python3
+"""Test stub for decK: substitutes ${{ env "X" }}, parses the YAML, posts it to the mock."""
+import json, os, re, sys, urllib.request
+import yaml
+a = sys.argv[1:]
+if a[:1] == ["version"]:
+    print("decK v1.stub (test harness)"); sys.exit(0)
+if a[:2] != ["gateway", "apply"]:
+    print("stub deck: unsupported", a, file=sys.stderr); sys.exit(2)
+for k in ("DECK_KONNECT_TOKEN", "DECK_KONNECT_ADDR", "DECK_KONNECT_CONTROL_PLANE_NAME"):
+    if not os.environ.get(k):
+        print("stub deck: missing", k, file=sys.stderr); sys.exit(1)
+def sub(m):
+    v = os.environ.get(m.group(1))
+    if v is None:
+        print("stub deck: env var not set:", m.group(1), file=sys.stderr); sys.exit(1)
+    return v
+for f in a[2:]:
+    txt = re.sub(r'\$\{\{ env "([A-Za-z0-9_]+)" \}\}', sub, open(f).read())
+    doc = yaml.safe_load(txt)
+    if doc.get("_format_version") != "3.0":
+        print("stub deck: bad _format_version", file=sys.stderr); sys.exit(1)
+    for pl in doc.get("plugins") or []:
+        if pl["name"] == "openid-connect" and not pl["config"]["principals"]["directory"]:
+            print("stub deck: principals.directory resolved to empty string", file=sys.stderr); sys.exit(1)
+    req = urllib.request.Request(os.environ["DECK_KONNECT_ADDR"] + "/_mock/apply", data=json.dumps(doc).encode(),
+                                 headers={"Authorization": "Bearer " + os.environ["DECK_KONNECT_TOKEN"], "Content-Type": "application/json"})
+    urllib.request.urlopen(req).read()
+    print("applied", os.path.basename(f), file=sys.stderr)

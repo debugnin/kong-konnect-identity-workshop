@@ -1,0 +1,29 @@
+# Scenario 5. Two Consumer Groups, each with a group-scoped rate limit.
+# Rate Limiting Advanced is an Enterprise plugin (included with Konnect).
+_format_version: "3.0"
+consumer_groups:
+  - name: tier-standard
+    tags: [identity-workshop]
+  - name: tier-gold
+    tags: [identity-workshop]
+plugins:
+  - name: rate-limiting-advanced
+    consumer_group: tier-standard
+    tags: [identity-workshop]
+    config:
+      identifier: consumer-group
+      limit: [3]
+      window_size: [30]
+      window_type: fixed
+      namespace: tier-standard
+      retry_after_jitter_max: 0
+  - name: rate-limiting-advanced
+    consumer_group: tier-gold
+    tags: [identity-workshop]
+    config:
+      identifier: consumer-group
+      limit: [10]
+      window_size: [30]
+      window_type: fixed
+      namespace: tier-gold
+      retry_after_jitter_max: 0
